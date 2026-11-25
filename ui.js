@@ -34,6 +34,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const homeBtn = document.getElementById("homeBtn");
   const outlineList = document.getElementById("outlineList");
   const popoverText = document.getElementById("popoverText");
+  const popoverIssue = document.getElementById("popoverIssue");
+  const level1Block = document.getElementById("level1Block");
+  const level1Text = document.getElementById("level1Text");
+  const hintLadder = document.getElementById("hintLadder");
+  const showLevel2Btn = document.getElementById("showLevel2Btn");
+  const showLevel3Btn = document.getElementById("showLevel3Btn");
+  const level2Block = document.getElementById("level2Block");
+  const level3Block = document.getElementById("level3Block");
+  const level2Text = document.getElementById("level2Text");
+  const level3Text = document.getElementById("level3Text");
   const floatingToolbar = document.getElementById("floatingToolbar");
   const aaMenuBtn = document.getElementById("aaMenuBtn");
   const aaPopover = document.getElementById("aaPopover");
@@ -50,11 +60,14 @@ document.addEventListener("DOMContentLoaded", () => {
   let authMode = "login";
   let libraryView = "home";
   let currentDocId = null;
-  let typingTimer = null;
   let saveTimer = null;
   let greetTimer = null;
   let lastActiveBlock = null;
   let toolbarOpen = false;
+  let hintRange = null;
+  let hintRequestId = 0;
+  let flaggedBlock = null;
+  let flaggedHTML = "";
 
   applyAppearance();
   applyLibraryWidth(state.libraryWidth || 232);
@@ -142,12 +155,8 @@ document.addEventListener("DOMContentLoaded", () => {
   homeBtn.addEventListener("click", () => openLibrary("home"));
 
   editorCanvas.addEventListener("input", () => {
-    document.body.classList.add("is-typing");
-    clearTimeout(typingTimer);
-    typingTimer = setTimeout(() => {
-      document.body.classList.remove("is-typing");
-    }, 1200);
-
+    const revisionClosedHint = flaggedBlockWasEdited();
+    if (revisionClosedHint) parkPopover();
     handleMarkdownShortcuts();
     writeCanvasIntoCurrentDocument();
     updateMetricsAndOutline();
@@ -185,41 +194,45 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (event.key === "Escape") {
       closeMenu();
-      socraticPopover.classList.add("hidden");
+      parkPopover();
       hideToolbar();
       aaPopover.classList.add("hidden");
-      editorCanvas.querySelectorAll(".flagged-sentence").forEach((el) => el.classList.remove("flagged-sentence"));
     }
   });
 
   function caretRect() {
     const selection = window.getSelection();
     if (!selection || !selection.rangeCount || !selection.anchorNode) return null;
-    if (!editorCanvas.contains(selection.anchorNode)) return null;
+    if (!editorCanvas.contains(selection.anchorNode) || selection.anchorNode === editorCanvas) return null;
     const range = selection.getRangeAt(0);
-    const node = range.startContainer;
-    const offset = range.startOffset;
-
-    if (range.collapsed && node.nodeType === Node.TEXT_NODE && offset > 0) {
-      const pre = document.createRange();
-      pre.setStart(node, offset - 1);
-      pre.setEnd(node, offset);
-      const last = pre.getClientRects()[0];
-      if (last && last.height > 0 && last.height < 80) {
-        return { x: last.right, top: last.top, bottom: last.bottom };
-      }
-    }
-
-    const direct = range.getClientRects()[0] || range.getBoundingClientRect();
-    if (direct && direct.height > 0 && direct.height < 80) {
-      const x = range.collapsed || direct.width < 8 ? direct.left : direct.right;
-      return { x, top: direct.top, bottom: direct.bottom };
-    }
-
-    const block = blockForNode(node);
+    const block = blockForNode(range.startContainer) || blockForNode(selection.anchorNode);
     if (!block) return null;
-    const box = block.getBoundingClientRect();
-    return { x: box.left, top: box.top, bottom: box.top + Math.min(box.height, 32) };
+    const blockBox = block.getBoundingClientRect();
+    if (blockBox.height <= 0) return null;
+
+    const insideBlock = (rect) => rect && rect.width >= 0 && rect.height > 0 && rect.height < 80
+      && rect.bottom >= blockBox.top - 4
+      && rect.top <= blockBox.bottom + 4;
+
+    if (range.collapsed && range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset > 0) {
+      const pre = document.createRange();
+      pre.setStart(range.startContainer, range.startOffset - 1);
+      pre.setEnd(range.startContainer, range.startOffset);
+      const mark = [...pre.getClientRects()].filter(insideBlock).pop();
+      if (mark) return { x: mark.right, top: mark.top, bottom: mark.bottom };
+    }
+
+    const line = [...range.getClientRects()].filter(insideBlock).pop();
+    if (line) {
+      const x = range.collapsed || line.width < 8 ? line.left : line.right;
+      return { x, top: line.top, bottom: line.bottom };
+    }
+
+    return {
+      x: blockBox.left,
+      top: blockBox.top,
+      bottom: Math.min(blockBox.bottom, blockBox.top + 32)
+    };
   }
 
   function hideToolbar() {
@@ -231,11 +244,11 @@ document.addEventListener("DOMContentLoaded", () => {
     floatingToolbar.classList.remove("hidden");
     const barWidth = floatingToolbar.offsetWidth;
     const barHeight = floatingToolbar.offsetHeight;
-    const viewWidth = window.innerWidth;
-    const viewHeight = window.innerHeight;
-    const placeAbove = y + barHeight + 10 > viewHeight && y > barHeight + 10;
+    const bounds = canvasWrapper.getBoundingClientRect();
+    const placeAbove = y + barHeight + 12 > bounds.bottom && y - bounds.top > barHeight + 12;
     floatingToolbar.classList.toggle("above", placeAbove);
-    floatingToolbar.style.left = `${Math.max(8, Math.min(x, viewWidth - barWidth - 8))}px`;
+    const left = Math.min(Math.max(x, bounds.left), Math.max(bounds.left, bounds.right - barWidth));
+    floatingToolbar.style.left = `${left}px`;
     floatingToolbar.style.top = `${y}px`;
   }
 
@@ -373,13 +386,21 @@ document.addEventListener("DOMContentLoaded", () => {
       showToolbarAt(caret.x, caret.bottom);
       return;
     }
-    const point = linePoint(event.clientX, event.clientY);
-    showToolbarAt(point.x, point.y);
+    const lines = pageLines();
+    if (!lines.length) return;
+    const last = lines[lines.length - 1];
+    showToolbarAt(last.rect.left, last.rect.bottom);
   }
 
   editorCanvas.addEventListener("contextmenu", openToolbarAtClick);
   editorCanvas.addEventListener("mousedown", (event) => {
-    if (event.button === 0) hideToolbar();
+    if (event.button === 0) {
+      hideToolbar();
+      return;
+    }
+    if (event.button !== 2) return;
+    event.preventDefault();
+    openToolbarAtClick(event);
   });
 
   floatingToolbar.querySelectorAll("button").forEach((btn) => {
@@ -447,6 +468,18 @@ document.addEventListener("DOMContentLoaded", () => {
   closePopoverBtn.addEventListener("click", () => {
     parkPopover();
   });
+  [showLevel2Btn, showLevel3Btn].forEach((btn) => {
+    btn.addEventListener("mousedown", (event) => event.preventDefault());
+  });
+  showLevel2Btn.addEventListener("click", () => {
+    showLevel2Btn.classList.add("hidden");
+    level2Block.classList.remove("hidden");
+    showLevel3Btn.classList.remove("hidden");
+  });
+  showLevel3Btn.addEventListener("click", () => {
+    showLevel3Btn.classList.add("hidden");
+    level3Block.classList.remove("hidden");
+  });
 
   window.addEventListener("resize", closeMenu);
   editorScroll.addEventListener("scroll", closeMenu, { passive: true });
@@ -476,7 +509,6 @@ document.addEventListener("DOMContentLoaded", () => {
       hideToolbar();
       aaPopover.classList.add("hidden");
       parkPopover();
-      document.body.classList.remove("is-typing");
     }
     closeMenu();
   }
@@ -694,8 +726,8 @@ document.addEventListener("DOMContentLoaded", () => {
       li.appendChild(button);
       outlineList.appendChild(li);
     });
-    syncOutlineToCaret();
     refreshEditedLabel();
+    syncOutlineToCaret();
   }
 
   function revealHeading(heading) {
@@ -779,14 +811,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function writeCanvasIntoCurrentDocument() {
     const doc = activeDocument();
-    if (!doc || editorCanvas.getAttribute("contenteditable") !== "true") return;
+    if (!doc || !editorCanvas.isContentEditable) return;
     doc.content = readCanvasHTML();
     const heading = extractTitle();
     if (heading) doc.title = heading;
     doc.updatedAt = Date.now();
+    refreshEditedLabel();
   }
-
-  let hintRange = null;
 
   function rememberHintRange() {
     const selection = window.getSelection();
@@ -804,9 +835,30 @@ document.addEventListener("DOMContentLoaded", () => {
     return null;
   }
 
+  function resetHintDisclosure() {
+    level1Block.classList.add("hidden");
+    popoverIssue.textContent = "";
+    level1Text.textContent = "";
+    popoverText.classList.remove("hidden");
+    hintLadder.classList.add("hidden");
+    showLevel2Btn.classList.remove("hidden");
+    level2Block.classList.add("hidden");
+    level2Text.textContent = "";
+    showLevel3Btn.classList.add("hidden");
+    level3Block.classList.add("hidden");
+    level3Text.textContent = "";
+  }
+
+  function flaggedBlockWasEdited() {
+    if (!flaggedBlock) return false;
+    if (!editorCanvas.contains(flaggedBlock)) return true;
+    return flaggedBlock.innerHTML !== flaggedHTML;
+  }
+
   async function showHint() {
     const target = resolveHintTarget();
-    editorCanvas.querySelectorAll(".flagged-sentence").forEach((el) => el.classList.remove("flagged-sentence"));
+    parkPopover();
+    const requestId = hintRequestId;
     if (!target) {
       popoverText.textContent = "Highlight a passage, or click into a paragraph, then ask for a hint.";
       canvasWrapper.appendChild(socraticPopover);
@@ -814,8 +866,11 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     if (target.block && target.block !== socraticPopover) {
+      flaggedBlock = target.block;
+      flaggedHTML = target.block.innerHTML;
       target.block.classList.add("flagged-sentence");
       target.block.insertAdjacentElement("afterend", socraticPopover);
+      clearTextHighlight(target.block);
     }
     socraticPopover.classList.remove("hidden");
     popoverText.textContent = "Preparing hint...";
@@ -829,10 +884,34 @@ document.addEventListener("DOMContentLoaded", () => {
         mode,
         apiKey: mode === "live" ? apiKey : ""
       });
-      popoverText.textContent = `${scaffold.issue_type}: ${scaffold.level1_flag}`;
+      if (requestId !== hintRequestId) return;
+      popoverText.textContent = "";
+      popoverText.classList.add("hidden");
+      level1Block.classList.remove("hidden");
+      popoverIssue.textContent = scaffold.issue_type;
+      level1Text.textContent = scaffold.level1_flag;
+      level2Text.textContent = scaffold.level2_question;
+      level3Text.textContent = scaffold.level3_template;
+      hintLadder.classList.remove("hidden");
     } catch (error) {
+      if (requestId !== hintRequestId) return;
+      popoverText.classList.remove("hidden");
       popoverText.textContent = error.message || "The hint could not be prepared.";
     }
+  }
+
+  function clearTextHighlight(block) {
+    const selection = window.getSelection();
+    if (!selection) return;
+    if (!block || !editorCanvas.contains(block)) {
+      selection.removeAllRanges();
+      return;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(block);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
   }
 
   function resolveHintTarget() {
@@ -925,10 +1004,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const inside = editorCanvas.contains(socraticPopover);
     const next = inside ? socraticPopover.nextSibling : null;
     if (inside) socraticPopover.remove();
+    const transient = ["outline-flash", "is-current-heading", "flagged-sentence", "active-block"];
+    const marked = [];
     editorCanvas.querySelectorAll(".outline-flash, .is-current-heading, .flagged-sentence, .active-block").forEach((el) => {
-      el.classList.remove("outline-flash", "is-current-heading", "flagged-sentence", "active-block");
+      const present = transient.filter((name) => el.classList.contains(name));
+      marked.push({ el, present });
+      el.classList.remove(...present);
     });
     const html = editorCanvas.innerHTML;
+    marked.forEach(({ el, present }) => el.classList.add(...present));
     if (inside) editorCanvas.insertBefore(socraticPopover, next);
     return html;
   }
@@ -939,9 +1023,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function parkPopover() {
+    hintRequestId += 1;
+    flaggedBlock = null;
+    flaggedHTML = "";
     socraticPopover.classList.add("hidden");
     if (editorCanvas.contains(socraticPopover)) canvasWrapper.appendChild(socraticPopover);
     editorCanvas.querySelectorAll(".flagged-sentence").forEach((el) => el.classList.remove("flagged-sentence"));
+    popoverText.textContent = "";
+    resetHintDisclosure();
   }
 
   function documentPreview(doc) {
@@ -1110,7 +1199,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const date = new Date(doc.updatedAt || Date.now());
     const day = date.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
-    const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
     editedLabel.textContent = `${day} at ${time}`;
   }
 

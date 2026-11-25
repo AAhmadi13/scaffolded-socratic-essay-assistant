@@ -176,6 +176,23 @@
               <button type="button" id="closePopoverBtn" class="popover-close" title="Dismiss Hint (Esc)">×</button>
             </div>
             <p class="popover-text" id="popoverText"></p>
+            <div id="level1Block" class="hint-stage hidden">
+              <p class="hint-level-label">Level 1 - Helping Statement</p>
+              <p class="popover-issue" id="popoverIssue"></p>
+              <p class="hint-copy" id="level1Text"></p>
+            </div>
+            <div id="hintLadder" class="hint-ladder hidden">
+              <button type="button" id="showLevel2Btn" class="hint-tier-btn">Need deeper guidance? Show Level 2 Question</button>
+              <div id="level2Block" class="hint-stage hidden">
+                <p class="hint-level-label">Level 2 - Guiding Question</p>
+                <p id="level2Text" class="hint-copy"></p>
+              </div>
+              <button type="button" id="showLevel3Btn" class="hint-tier-btn hidden">Still stuck? Show Level 3 Structural Frame</button>
+              <div id="level3Block" class="hint-stage hidden">
+                <p class="hint-level-label">Level 3 - Structural Frame</p>
+                <p id="level3Text" class="hint-frame"></p>
+              </div>
+            </div>
           </aside>
         </main>
         </div>
