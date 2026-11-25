@@ -145,6 +145,16 @@
               <button type="button" class="theme-opt active" data-theme-choice="light">Paper Light</button>
               <button type="button" class="theme-opt" data-theme-choice="dark">Dark Mode</button>
             </div>
+            <div class="aa-divider"></div>
+            <div class="aa-section-label">Hint</div>
+            <div class="theme-options">
+              <button type="button" class="hint-mode-opt active" data-hint-mode="demo">Demo</button>
+              <button type="button" class="hint-mode-opt" data-hint-mode="live">Live Gemini</button>
+            </div>
+            <label class="hint-key-field">
+              API key
+              <input id="hintApiKey" type="password" autocomplete="off" placeholder="Optional" />
+            </label>
           </div>
         </div>
           </div>
@@ -208,6 +218,7 @@
 
   <div id="contextMenu" class="context-menu hidden" role="menu"></div>
 
+  <script src="app.js"></script>
   <script src="ui.js"></script>
 </body>
 </html>

@@ -41,6 +41,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const charCountLabel = document.getElementById("charCountLabel");
   const readTimeLabel = document.getElementById("readTimeLabel");
   const getHintBtn = document.getElementById("getHintBtn");
+  const hintApiKeyInput = document.getElementById("hintApiKey");
   const socraticPopover = document.getElementById("socraticPopover");
   const closePopoverBtn = document.getElementById("closePopoverBtn");
   const contextMenu = document.getElementById("contextMenu");
@@ -425,6 +426,21 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  const hintModeButtons = document.querySelectorAll(".hint-mode-opt");
+  const savedHintMode = localStorage.getItem("socraticcanvas.hintMode") === "live" ? "live" : "demo";
+  hintApiKeyInput.value = localStorage.getItem("socraticcanvas.geminiKey") || "";
+  hintModeButtons.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.hintMode === savedHintMode);
+    btn.addEventListener("click", () => {
+      hintModeButtons.forEach((item) => item.classList.remove("active"));
+      btn.classList.add("active");
+      localStorage.setItem("socraticcanvas.hintMode", btn.dataset.hintMode);
+    });
+  });
+  hintApiKeyInput.addEventListener("input", () => {
+    localStorage.setItem("socraticcanvas.geminiKey", hintApiKeyInput.value.trim());
+  });
+
   getHintBtn.addEventListener("mousedown", (event) => event.preventDefault());
   getHintBtn.addEventListener("click", showHint);
 
@@ -788,11 +804,11 @@ document.addEventListener("DOMContentLoaded", () => {
     return null;
   }
 
-  function showHint() {
+  async function showHint() {
     const target = resolveHintTarget();
     editorCanvas.querySelectorAll(".flagged-sentence").forEach((el) => el.classList.remove("flagged-sentence"));
     if (!target) {
-      popoverText.textContent = "Click into a sentence, or highlight a few words, then ask for a hint.";
+      popoverText.textContent = "Highlight a passage, or click into a paragraph, then ask for a hint.";
       canvasWrapper.appendChild(socraticPopover);
       socraticPopover.classList.remove("hidden");
       return;
@@ -801,8 +817,22 @@ document.addEventListener("DOMContentLoaded", () => {
       target.block.classList.add("flagged-sentence");
       target.block.insertAdjacentElement("afterend", socraticPopover);
     }
-    popoverText.textContent = hintForText(target.text, target.block);
     socraticPopover.classList.remove("hidden");
+    popoverText.textContent = "Preparing hint...";
+    try {
+      const hintMode = document.querySelector(".hint-mode-opt.active");
+      const mode = hintMode && hintMode.dataset.hintMode === "live" ? "live" : "demo";
+      const apiKey = hintApiKeyInput.value.trim();
+      const scaffold = await window.SocraticHarness.requestSocraticScaffold({
+        selectedText: target.text,
+        contextText: editorCanvas.innerText,
+        mode,
+        apiKey: mode === "live" ? apiKey : ""
+      });
+      popoverText.textContent = `${scaffold.issue_type}: ${scaffold.level1_flag}`;
+    } catch (error) {
+      popoverText.textContent = error.message || "The hint could not be prepared.";
+    }
   }
 
   function resolveHintTarget() {
