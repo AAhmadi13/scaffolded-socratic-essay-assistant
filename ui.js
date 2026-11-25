@@ -51,6 +51,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const charCountLabel = document.getElementById("charCountLabel");
   const readTimeLabel = document.getElementById("readTimeLabel");
   const getHintBtn = document.getElementById("getHintBtn");
+  const traceToggleBtn = document.getElementById("traceToggleBtn");
+  const traceDrawer = document.getElementById("traceDrawer");
+  const traceList = document.getElementById("traceList");
+  const traceEmpty = document.getElementById("traceEmpty");
+  const clearTraceBtn = document.getElementById("clearTraceBtn");
+  const closeTraceBtn = document.getElementById("closeTraceBtn");
   const hintApiKeyInput = document.getElementById("hintApiKey");
   const socraticPopover = document.getElementById("socraticPopover");
   const closePopoverBtn = document.getElementById("closePopoverBtn");
@@ -68,6 +74,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let hintRequestId = 0;
   let flaggedBlock = null;
   let flaggedHTML = "";
+  const sessionTrace = [];
+  let activeTraceId = null;
 
   applyAppearance();
   applyLibraryWidth(state.libraryWidth || 232);
@@ -197,6 +205,7 @@ document.addEventListener("DOMContentLoaded", () => {
       parkPopover();
       hideToolbar();
       aaPopover.classList.add("hidden");
+      setTraceOpen(false);
     }
   });
 
@@ -464,6 +473,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   getHintBtn.addEventListener("mousedown", (event) => event.preventDefault());
   getHintBtn.addEventListener("click", showHint);
+  traceToggleBtn.addEventListener("click", () => {
+    setTraceOpen(traceDrawer.classList.contains("hidden"));
+  });
+  closeTraceBtn.addEventListener("click", () => setTraceOpen(false));
+  clearTraceBtn.addEventListener("click", () => {
+    sessionTrace.length = 0;
+    activeTraceId = null;
+    renderTrace();
+  });
 
   closePopoverBtn.addEventListener("click", () => {
     parkPopover();
@@ -475,10 +493,12 @@ document.addEventListener("DOMContentLoaded", () => {
     showLevel2Btn.classList.add("hidden");
     level2Block.classList.remove("hidden");
     showLevel3Btn.classList.remove("hidden");
+    unlockTraceTier("Level 2");
   });
   showLevel3Btn.addEventListener("click", () => {
     showLevel3Btn.classList.add("hidden");
     level3Block.classList.remove("hidden");
+    unlockTraceTier("Level 3");
   });
 
   window.addEventListener("resize", closeMenu);
@@ -855,14 +875,110 @@ document.addEventListener("DOMContentLoaded", () => {
     return flaggedBlock.innerHTML !== flaggedHTML;
   }
 
+  function hintRoute() {
+    const hintMode = document.querySelector(".hint-mode-opt.active");
+    const mode = hintMode && hintMode.dataset.hintMode === "live" ? "live" : "demo";
+    const apiKey = hintApiKeyInput.value.trim();
+    const live = mode === "live" && Boolean(apiKey);
+    return {
+      mode,
+      apiKey: live ? apiKey : "",
+      label: live ? "Live Gemini" : "Demo fallback",
+      live
+    };
+  }
+
+  function executionContext(route, selectedText) {
+    if (!route.live) return "Local demo rule (target excerpt only; no LLM API call)";
+    const selected = String(selectedText || "").trim();
+    const context = editorCanvas.innerText.trim();
+    if (context && context !== selected) {
+      return "System instructions + target excerpt + surrounding paragraph context";
+    }
+    return "System instructions + target excerpt";
+  }
+
+  function clipTraceSummary(text) {
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (!clean) return "Empty selection";
+    const words = clean.split(" ").length;
+    const clipped = clean.length > 96 ? `${clean.slice(0, 93)}...` : clean;
+    return `${words} words: ${clipped}`;
+  }
+
+  function recordTrace(entry) {
+    sessionTrace.unshift(entry);
+    activeTraceId = entry.tiers.length ? entry.id : null;
+    renderTrace();
+  }
+
+  function unlockTraceTier(tier) {
+    const entry = sessionTrace.find((item) => item.id === activeTraceId);
+    if (!entry || entry.tiers.includes(tier)) return;
+    entry.tiers.push(tier);
+    renderTrace();
+  }
+
+  function renderTrace() {
+    traceList.replaceChildren();
+    traceEmpty.classList.toggle("hidden", sessionTrace.length > 0);
+    sessionTrace.forEach((entry) => {
+      const item = document.createElement("li");
+      item.className = "trace-entry";
+      const time = document.createElement("p");
+      time.className = "trace-time";
+      time.textContent = new Date(entry.at).toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+      item.appendChild(time);
+      [
+        ["Trigger", entry.summary],
+        ["Mode", entry.mode],
+        ["Context / Execution", entry.context],
+        ["Unlocked tiers", entry.tiers.length ? entry.tiers.join(", ") : "None"],
+        ["Validation", entry.validation],
+        ["Latency", `${entry.latency} ms`]
+      ].forEach(([label, value]) => {
+        const row = document.createElement("p");
+        row.className = "trace-row";
+        const key = document.createElement("span");
+        key.className = "trace-key";
+        key.textContent = label;
+        row.append(key, document.createTextNode(value));
+        item.appendChild(row);
+      });
+      traceList.appendChild(item);
+    });
+  }
+
+  function setTraceOpen(open) {
+    traceDrawer.classList.toggle("hidden", !open);
+    traceToggleBtn.classList.toggle("active", open);
+    traceToggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
   async function showHint() {
     const target = resolveHintTarget();
+    const started = performance.now();
     parkPopover();
     const requestId = hintRequestId;
+    const route = hintRoute();
     if (!target) {
       popoverText.textContent = "Highlight a passage, or click into a paragraph, then ask for a hint.";
       canvasWrapper.appendChild(socraticPopover);
       socraticPopover.classList.remove("hidden");
+      recordTrace({
+        id: uid(),
+        at: Date.now(),
+        summary: "No passage selected",
+        mode: route.label,
+        context: "No prompt assembled",
+        tiers: [],
+        validation: "No target. No prose was written into the essay.",
+        latency: Math.round(performance.now() - started)
+      });
       return;
     }
     if (target.block && target.block !== socraticPopover) {
@@ -875,14 +991,11 @@ document.addEventListener("DOMContentLoaded", () => {
     socraticPopover.classList.remove("hidden");
     popoverText.textContent = "Preparing hint...";
     try {
-      const hintMode = document.querySelector(".hint-mode-opt.active");
-      const mode = hintMode && hintMode.dataset.hintMode === "live" ? "live" : "demo";
-      const apiKey = hintApiKeyInput.value.trim();
       const scaffold = await window.SocraticHarness.requestSocraticScaffold({
         selectedText: target.text,
         contextText: editorCanvas.innerText,
-        mode,
-        apiKey: mode === "live" ? apiKey : ""
+        mode: route.mode,
+        apiKey: route.apiKey
       });
       if (requestId !== hintRequestId) return;
       popoverText.textContent = "";
@@ -893,10 +1006,34 @@ document.addEventListener("DOMContentLoaded", () => {
       level2Text.textContent = scaffold.level2_question;
       level3Text.textContent = scaffold.level3_template;
       hintLadder.classList.remove("hidden");
+      showLevel2Btn.classList.remove("hidden");
+      level2Block.classList.add("hidden");
+      showLevel3Btn.classList.add("hidden");
+      level3Block.classList.add("hidden");
+      recordTrace({
+        id: uid(),
+        at: Date.now(),
+        summary: clipTraceSummary(target.text),
+        mode: route.label,
+        context: executionContext(route, target.text),
+        tiers: ["Level 1"],
+        validation: "Structured hint returned. No auto-replacement prose was inserted.",
+        latency: Math.round(performance.now() - started)
+      });
     } catch (error) {
       if (requestId !== hintRequestId) return;
       popoverText.classList.remove("hidden");
       popoverText.textContent = error.message || "The hint could not be prepared.";
+      recordTrace({
+        id: uid(),
+        at: Date.now(),
+        summary: clipTraceSummary(target.text),
+        mode: route.label,
+        context: executionContext(route, target.text),
+        tiers: [],
+        validation: error.message || "The hint could not be prepared. No prose was written into the essay.",
+        latency: Math.round(performance.now() - started)
+      });
     }
   }
 

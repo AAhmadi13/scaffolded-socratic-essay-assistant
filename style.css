@@ -464,6 +464,7 @@ input:focus-visible {
 }
 
 #editorScreen {
+  position: relative;
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
@@ -1248,9 +1249,112 @@ body[data-theme="dark"] .popover-badge {
   border-radius: 8px;
 }
 
-.status-action-btn:hover {
+.status-action-btn:hover,
+.status-action-btn.active {
   color: var(--text-main);
   background: var(--border-subtle);
+}
+
+.trace-drawer {
+  flex: 0 0 320px;
+  width: 320px;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border-subtle);
+  overflow: hidden;
+  font-family: "Inter", sans-serif;
+}
+
+.trace-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.trace-header h2 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.trace-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.trace-clear,
+.trace-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: "Inter", sans-serif;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.trace-close {
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.trace-clear:hover,
+.trace-close:hover {
+  color: var(--text-main);
+  background: var(--border-subtle);
+}
+
+.trace-empty {
+  padding: 16px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.trace-list {
+  list-style: none;
+  overflow: auto;
+  min-height: 0;
+}
+
+.trace-entry {
+  padding: 12px 14px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.trace-time {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.trace-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-main);
+}
+
+.trace-key {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-faint);
 }
 
 .get-hint-btn {
@@ -1318,6 +1422,20 @@ body[data-theme="dark"] .popover-badge {
 }
 
 @media (max-width: 720px) {
+  .editor-body {
+    position: relative;
+  }
+
+  .trace-drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(320px, 88vw);
+    z-index: 40;
+    box-shadow: var(--popover-shadow);
+  }
+
   #libraryScreen.active {
     flex-direction: column;
   }

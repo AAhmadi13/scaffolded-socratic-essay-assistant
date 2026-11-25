@@ -197,6 +197,18 @@
         </main>
         </div>
       </div>
+
+      <aside id="traceDrawer" class="trace-drawer hidden" aria-label="System Execution Trace">
+        <div class="trace-header">
+          <h2>System Execution Trace</h2>
+          <div class="trace-header-actions">
+            <button type="button" id="clearTraceBtn" class="trace-clear">Clear</button>
+            <button type="button" id="closeTraceBtn" class="trace-close" title="Close trace">×</button>
+          </div>
+        </div>
+        <p id="traceEmpty" class="trace-empty">No hint requests this session.</p>
+        <ol id="traceList" class="trace-list"></ol>
+      </aside>
     </div>
 
     <footer id="statusBar" class="status-bar">
@@ -208,6 +220,9 @@
         <span id="readTimeLabel">1 min read</span>
       </div>
       <div class="status-right">
+        <button type="button" id="traceToggleBtn" class="status-action-btn" aria-expanded="false" aria-controls="traceDrawer">
+          Trace
+        </button>
         <button type="button" id="getHintBtn" class="get-hint-btn" title="Check highlighted sentence or current paragraph">
           Get Hint
         </button>
